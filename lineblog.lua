@@ -83,7 +83,7 @@ discover_item = function(target, item)
     if string.match(item, "boxsmall") then
       discover_item(target, string.gsub(item, "boxsmall", "boxlarge"))
     end
-print('discovered', item)
+--print('discovered', item)
     target[item] = true
     return true
   end
@@ -272,7 +272,6 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     if not processed(url_)
       and not processed(url_ .. "/")
       and allowed(url_, origurl) then
-print('QUEUING', url_)
       if string.match(url_, "^https?://blog%-api%.line%-apps%.com/v1/") then
         table.insert(urls, {
           url=url_,
