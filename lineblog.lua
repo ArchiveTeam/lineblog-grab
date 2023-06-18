@@ -488,17 +488,22 @@ end
 
 wget.callbacks.write_to_warc = function(url, http_stat)
   status_code = http_stat["statcode"]
+  set_item(url["url"])
   url_count = url_count + 1
   io.stdout:write(url_count .. "=" .. status_code .. " " .. url["url"] .. " \n")
   io.stdout:flush()
   logged_response = true
-  set_item(url["url"])
   if not item_name then
     error("No item name found.")
   end
   if string.match(url["url"], "^https?://blog%-api%.line%-apps%.com/v1/")
     or string.match(url["url"], "^https?://[^/]*lineblog%.me/api/tag/") then
     local html = read_file(http_stat["local_file"])
+    if not string.match(html, "^%s*{") then
+      print("Did not get JSON data.")
+      retry_url = true
+      return false
+    end
     local json = JSON:decode(html)
     local status = json["status"]
     if status == 500
@@ -554,6 +559,9 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   end
 
   set_item(url["url"])
+  if not item_name then
+    error("No item name found.")
+  end
 
   if status_code >= 300 and status_code <= 399 then
     local newloc = urlparse.absolute(url["url"], http_stat["newloc"])
@@ -573,7 +581,7 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   end
 
   if status_code == 0 or retry_url then
-    io.stdout:write("Server returned bad response.")
+    io.stdout:write("Server returned bad response. ")
     io.stdout:flush()
     tries = tries + 1
     if tries > 5 then
