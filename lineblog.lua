@@ -526,6 +526,28 @@ wget.callbacks.write_to_warc = function(url, http_stat)
       retry_url = true
       return false
     end
+  elseif item_type ~= "cdn-obs"
+    and item_type ~= "resize"
+    and http_stat["statcode"] ~= 302
+    and http_stat["statcode"] ~= 404
+    and not string.match(url["url"], "/_/embed_resize/")
+    and not string.match(url["url"], "/site%.css")
+    and not string.match(url["url"], "/atom%.xml")
+    and not string.match(url["url"], "/settings/header%.js")
+    and not string.match(url["url"], "/settings/ad%.js") then
+    local html = read_file(http_stat["local_file"])
+    if not string.match(html, "</html>")
+      or (
+        string.match(url["url"], "^https?://blog%.line%-apps%.com/v1/blog/")
+        and not string.match(html, '<h1%s+class="article%-title">')
+      ) or (
+        string.match(url["url"], "^https?://[^/]*lineblog%.me/[^/]+/archives/")
+        and not string.match(html, "title%s*:%s*'")
+      ) then
+      print("Bad HTML.")
+      retry_url = true
+      return false
+    end
   end
   if http_stat["statcode"] ~= 200
     and http_stat["statcode"] ~= 301
