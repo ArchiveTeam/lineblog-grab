@@ -496,7 +496,8 @@ wget.callbacks.write_to_warc = function(url, http_stat)
   if string.match(url["url"], "^https?://blog%-api%.line%-apps%.com/v1/")
     or string.match(url["url"], "^https?://[^/]*lineblog%.me/api/tag/") then
     local html = read_file(http_stat["local_file"])
-    if not string.match(html, "^%s*{") then
+    if not string.match(html, "^%s*{")
+      or not string.match(html, "}%s*$") then
       print("Did not get JSON data.")
       retry_url = true
       return false
