@@ -162,7 +162,8 @@ allowed = function(url, parenturl)
 
   for pattern, type_ in pairs({
     ["^https?://obs%.line%-scdn%.net/([a-zA-Z0-9%-_]+)"]="cdn-obs",
-    ["^https?://[^/]*lineblog%.me/([a-zA-Z0-9%-_]+)/"]="blog",
+    ["^https?://lineblog%.me/([a-zA-Z0-9%-_]+)/"]="blog",
+    ["^https?://www%.lineblog%.me/([a-zA-Z0-9%-_]+)/"]="blog",
     ["^https?://[^/]*lineblog%.me/tag/([a-zA-Z0-9%%%-_]+)"]="tag",
     ["^https?://resize%-image%.lineblog%.me/(.+)$"]="resize",
     ["https?://[^/]*lineblog%.me/([^/]+)/archives/([0-9]+)%.html"]="post",
@@ -181,7 +182,9 @@ allowed = function(url, parenturl)
       local new_item = type_ .. ":" .. match
       if new_item ~= item_name then
         discover_item(discovered_items, new_item)
-        return false
+        if type_ == "post" then
+          return false
+        end
       end
     end
   end
@@ -305,6 +308,10 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
 
   local function checknewurl(newurl)
     newurl = decode_codepoint(newurl)
+    if item_type == "post"
+      and string.match(newurl, "^/([0-9]+)/$") == item_value then
+      return nil
+    end
     if string.match(newurl, "['\"><]") then
       return nil
     end
@@ -430,14 +437,14 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       local json = JSON:decode(html)
       local next_page_key = nil
       if is_blog_api then
-        assert(json["status"] == 200)
         json = json["data"]
-      elseif is_tag_api then
-        assert(json["status"] == "success")
-      else
+      elseif not is_tag_api then
         error()
       end
-      local next_page_key = json["nextPageKey"]
+      local next_page_key = nil
+      if json then
+        next_pahe_key = json["nextPageKey"]
+      end
       if next_page_key then
         next_page_key = tostring(next_page_key)
         local newurl = url
@@ -492,7 +499,8 @@ wget.callbacks.write_to_warc = function(url, http_stat)
   if string.match(url["url"], "^https?://blog%-api%.line%-apps%.com/v1/")
     or string.match(url["url"], "^https?://[^/]*lineblog%.me/api/tag/") then
     local html = read_file(http_stat["local_file"])
-    local status = JSON:decode(html)["status"]
+    local json = JSON:decode(html)
+    local status = json["status"]
     if status == 500
       and (
         string.match(url["url"], "/search/")
@@ -504,6 +512,12 @@ wget.callbacks.write_to_warc = function(url, http_stat)
       ) then
       print("Reached the end of search!")
       return false
+    elseif status == 403
+      and string.match(url["url"], "/comment/list")
+      and json["error"]["errorCode"] == 4002
+      and json["error"]["message"] == "コメントは表示出来ません" then
+      print("Comments now allowed on post.")
+      return false
     elseif status ~= 200 and status ~= "success" then
       print("Bad API response.")
       retry_url = true
@@ -511,7 +525,8 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     end
   end
   if http_stat["statcode"] ~= 200
-    and http_stat["statcode"] ~= 301 then
+    and http_stat["statcode"] ~= 301
+    and http_stat["statcode"] ~= 404 then
     retry_url = true
     return false
   end
