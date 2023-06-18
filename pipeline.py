@@ -16,7 +16,6 @@ import subprocess
 import sys
 import time
 import string
-import urllib.parse
 
 import seesaw
 from seesaw.externalprocess import WgetDownload
@@ -43,13 +42,11 @@ if StrictVersion(seesaw.__version__) < StrictVersion('0.8.5'):
 WGET_AT = find_executable(
     'Wget+AT',
     [
-        'GNU Wget 1.21.3-at.20230605.01',
-        'GNU Wget 1.21.3-at.20230208.01',
-        'GNU Wget 1.21.3-at.20220608.02'
+        'GNU Wget 1.21.3-at.20230605.01'
     ],
     [
-         './wget-at',
-         '/home/warrior/data/wget-at-gnutls'
+        './wget-at',
+        '/home/warrior/data/wget-at-gnutls'
     ]
 )
 
@@ -62,11 +59,11 @@ if not WGET_AT:
 #
 # Update this each time you make a non-cosmetic change.
 # It will be added to the WARC files and reported to the tracker.
-VERSION = '20230612.01'
+VERSION = '20230617.01'
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36'
-TRACKER_ID = 'line-blog'
-TRACKER_HOST = 'tracker'
-MULTI_ITEM_SIZE = 1
+TRACKER_ID = 'lineblog'
+TRACKER_HOST = 'legacy-api.arpa.li'
+MULTI_ITEM_SIZE = 40
 
 
 ###########################################################################
@@ -131,18 +128,18 @@ class PrepareDirectories(SimpleTask):
             time.strftime('%Y%m%d-%H%M%S')
         ])
 
-        open('%(item_dir)s/%(warc_file_base)s_mobile.warc.gz' % item, 'w').close()
-        open('%(item_dir)s/%(warc_file_base)s_desktop.warc.gz' % item, 'w').close()
+        open('%(item_dir)s/%(warc_file_base)s.warc.zst' % item, 'w').close()
+        open('%(item_dir)s/%(warc_file_base)s_data.txt' % item, 'w').close()
 
 class MoveFiles(SimpleTask):
     def __init__(self):
         SimpleTask.__init__(self, 'MoveFiles')
 
     def process(self, item):
-        os.rename('%(item_dir)s/%(warc_file_base)s_mobile.warc.gz' % item,
-              '%(data_dir)s/%(warc_file_base)s_mobile.warc.gz' % item)
-        os.rename('%(item_dir)s/%(warc_file_base)s_desktop.warc.gz' % item,
-              '%(data_dir)s/%(warc_file_base)s_desktop.warc.gz' % item)
+        os.rename('%(item_dir)s/%(warc_file_base)s.warc.zst' % item,
+              '%(data_dir)s/%(warc_file_base)s.%(dict_project)s.%(dict_id)s.warc.zst' % item)
+        os.rename('%(item_dir)s/%(warc_file_base)s_data.txt' % item,
+              '%(data_dir)s/%(warc_file_base)s_data.txt' % item)
 
         shutil.rmtree('%(item_dir)s' % item)
 
@@ -157,10 +154,9 @@ class SetBadUrls(SimpleTask):
         items_lower = [s.lower() for s in items]
         with open('%(item_dir)s/%(warc_file_base)s_bad-items.txt' % item, 'r') as f:
             for aborted_item in f:
-                aborted_item_original = aborted_item
                 aborted_item = aborted_item.strip().lower()
                 index = items_lower.index(aborted_item)
-                item.log_output('Item {} is aborted.'.format(aborted_item_original))
+                item.log_output('Item {} is aborted.'.format(aborted_item))
                 items.pop(index)
                 items_lower.pop(index)
         item['item_name'] = '\0'.join(items)
@@ -200,7 +196,7 @@ class ZstdDict(object):
         if cls.data is not None and time.time() - cls.created < 1800:
             return cls.data
         response = requests.get(
-            'https://*/dictionary',
+            'https://legacy-api.arpa.li/dictionary',
             params={
                 'project': TRACKER_ID
             }
@@ -226,80 +222,27 @@ class ZstdDict(object):
         return cls.data
 
 
-class WgetArgsMobile(object):
+class WgetArgs(object):
+    post_chars = string.digits + string.ascii_lowercase
+
+    def int_to_str(self, i):
+        d, m = divmod(i, 36)
+        if d > 0:
+            return self.int_to_str(d) + self.post_chars[m]
+        return self.post_chars[m]
+
     def realize(self, item):
-        #with open('user-agents.txt', 'r') as f:
-        #    USER_AGENT = random.choice(list(f)).strip()
-        wget_args = [
-            WGET_AT,
-            '-U', 'okhttp/4.7.2',
-            '-nv',
-            '--content-on-error',
-            '--no-http-keep-alive',
-            '--no-cookies',
-            '--lua-script', 'lineblog.lua',
-            '-o', ItemInterpolation('%(item_dir)s/wget.log'),
-            '--no-check-certificate',
-            '--output-document', ItemInterpolation('%(item_dir)s/wget.tmp'),
-            '--truncate-output',
-            '-e', 'robots=off',
-            '--rotate-dns',
-            '--recursive', '--level=inf',
-            '--no-parent',
-            '--page-requisites',
-            '--timeout', '30',
-            '--tries', 'inf',
-            '--domains', 'blog.line-apps.com,blog-api.line-apps.com',
-            '--span-hosts',
-            '--waitretry', '30',
-            '--warc-file', ItemInterpolation('%(item_dir)s/%(warc_file_base)s_mobile'),
-            '--warc-header', 'operator: Archive Team',
-            '--warc-header', 'x-wget-at-project-version: ' + VERSION,
-            '--warc-header', 'x-wget-at-project-name: ' + TRACKER_ID,
-            '--warc-dedup-url-agnostic',
-        ]
-
-        item_name = item['item_name'].split('\0')[0]
-        wget_args.extend(['--warc-header', 'x-wget-at-project-item-name: '+item_name])
-        item_type, item_value = item_name.split(':', 1)
-        if item_type == 'b':
-            wget_args.extend(['--warc-header', 'line-blog-name: '+item_value])
-            wget_args.append('https://blog-api.line-apps.com/v1/blog/'+item_value+'/articles?withBlog=1')
-            wget_args.append('https://blog-api.line-apps.com/v1/blog/'+item_value+'/followers/list')
-            wget_args.append('https://blog-api.line-apps.com/v1/blog/'+item_value+'/follow/list')
-        elif item_type == 't':
-            wget_args.extend(['--warc-header', 'line-blog-tag: '+item_value])
-            wget_args.append('https://blog-api.line-apps.com/v1/explore/tag?tag='+item_value+'&withTag=1')
-        elif item_type == 'kw':
-            # wget_args.extend(['--warc-header', 'line-blog-keyword: '+item_value])
-            wget_args.append('https://blog-api.line-apps.com/v1/search/articles?keyword='+urllib.parse.quote_plus(item_value))
-            wget_args.append('https://blog-api.line-apps.com/v1/search/tags?keyword='+urllib.parse.quote_plus(item_value))
-            wget_args.append('https://blog-api.line-apps.com/v1/search/users?keyword='+urllib.parse.quote_plus(item_value))
-            wget_args.append('https://blog-api.line-apps.com/v1/suggest/tags?keyword='+urllib.parse.quote_plus(item_value))
-        else:
-            raise Exception('Unknown item')
-        item['item_type'], item['item_value'] = item_type, item_value
-
-        if 'bind_address' in globals():
-            wget_args.extend(['--bind-address', globals()['bind_address']])
-            print('')
-            print('*** Wget will bind address at {0} ***'.format(
-                globals()['bind_address']))
-            print('')
-
-        return realize(wget_args, item)
-
-class WgetArgsDesktop(object):
-    def realize(self, item):
-        #with open('user-agents.txt', 'r') as f:
-        #    USER_AGENT = random.choice(list(f)).strip()
         wget_args = [
             WGET_AT,
             '-U', USER_AGENT,
             '-nv',
+            '--host-lookups', 'dns',
+            '--hosts-file', '/dev/null',
+            '--resolvconf-file', '/dev/null',
+            '--dns-servers', '9.9.9.10,149.112.112.10,2620:fe::10,2620:fe::fe:10',
+            '--load-cookies', 'cookies.txt',
             '--content-on-error',
             '--no-http-keep-alive',
-            '--no-cookies',
             '--lua-script', 'lineblog.lua',
             '-o', ItemInterpolation('%(item_dir)s/wget.log'),
             '--no-check-certificate',
@@ -315,29 +258,53 @@ class WgetArgsDesktop(object):
             '--domains', 'lineblog.me',
             '--span-hosts',
             '--waitretry', '30',
-            '--warc-file', ItemInterpolation('%(item_dir)s/%(warc_file_base)s_desktop'),
+            '--warc-file', ItemInterpolation('%(item_dir)s/%(warc_file_base)s'),
             '--warc-header', 'operator: Archive Team',
             '--warc-header', 'x-wget-at-project-version: ' + VERSION,
             '--warc-header', 'x-wget-at-project-name: ' + TRACKER_ID,
             '--warc-dedup-url-agnostic',
-            '--header', 'Accept-Language: ja-JP',
+            '--warc-compression-use-zstd',
+            '--warc-zstd-dict-no-include',
+            '--header', 'Accept-Language: en-US;q=0.9, en;q=0.8'
         ]
+        dict_data = ZstdDict.get_dict()
+        with open(os.path.join(item['item_dir'], 'zstdict'), 'wb') as f:
+            f.write(dict_data['dict'])
+        item['dict_id'] = dict_data['id']
+        item['dict_project'] = TRACKER_ID
+        wget_args.extend([
+            '--warc-zstd-dict', ItemInterpolation('%(item_dir)s/zstdict'),
+        ])
 
-        item_name = item['item_name'].split('\0')[0]
-        wget_args.extend(['--warc-header', 'x-wget-at-project-item-name: '+item_name])
-        item_type, item_value = item_name.split(':', 1)
-        if item_type == 'b':
-            wget_args.extend(['--warc-header', 'line-blog-name: '+item_value])
-            wget_args.append('https://lineblog.me/'+item_value+'/')
-        elif item_type == 't':
-            wget_args.extend(['--warc-header', 'line-blog-tag: '+item_value])
-            wget_args.append('https://www.lineblog.me/tag/'+item_value)
-        elif item_type == 'kw':
-            # do nothing
-            return [WGET_AT, '--quiet', '--spider', 'https://lineblog.me/']
-        else:
-            raise Exception('Unknown item')
-        item['item_type'], item['item_value'] = item_type, item_value
+        for item_name in item['item_name'].split('\0'):
+            wget_args.extend(['--warc-header', 'x-wget-at-project-item-name: '+item_name])
+            wget_args.append('item-name://'+item_name)
+            item_type, item_value = item_name.split(':', 1)
+            if item_type == 'blog':
+                wget_args.extend(['--warc-header', 'lineblog-blog: '+item_value])
+                wget_args.append('https://lineblog.me/{}/'.format(item_value))
+            elif item_type == 'cdn-obs':
+                url = 'https://obs.line-scdn.net/' + item_value
+                wget_args.extend(['--warc-header', 'lineblog-asset: '+item_value])
+                wget_args.append(url)
+            elif item_type == 'tag':
+                wget_args.extend(['--warc-header', 'lineblog-tag: '+item_value])
+                wget_args.append('https://www.lineblog.me/tag/'+item_value)
+            elif item_type == 'keyword':
+                wget_args.extend(['--warc-header', 'lineblog-keyword: '+item_value])
+                wget_args.append('https://blog-api.line-apps.com/v1/search/articles?keyword='+item_value)
+            elif item_type == 'resize':
+                url = 'https://resize-image.lineblog.me/' + item_value
+                wget_args.extend(['--warc-header', 'lineblog-asset: '+url])
+                wget_args.append(url)
+            elif item_type == 'post':
+                user, post_id = item_value.split(':', 1)
+                wget_args.extend(['--warc-header', 'lineblog-post-id: '+post_id])
+                wget_args.append('https://blog-api.line-apps.com/v1/blog/{}/article/{}/info'.format(user, post_id))
+            else:
+                raise Exception('Unknown item')
+
+        item['item_name_newline'] = item['item_name'].replace('\0', '\n')
 
         if 'bind_address' in globals():
             wget_args.extend(['--bind-address', globals()['bind_address']])
@@ -354,40 +321,27 @@ class WgetArgsDesktop(object):
 # This will be shown in the warrior management panel. The logo should not
 # be too big. The deadline is optional.
 project = Project(
-    title='LINE BLOG',
+    title=TRACKER_ID,
     project_html='''
-        <img class="project-logo" alt="Project logo" src="https://wiki.archiveteam.org/images/4/4d/LINE_BLOG_icon.png" height="50px" title="">
-        <h2>LINE BLOG <span class="links"><a href="https://lineblog.me/">Website</a> &middot; <a href="http://tracker.archiveteam.org/#/">Leaderboard</a> &middot; <a href="https://wiki.archiveteam.org/index.php/LINE_BLOG">Wiki</a></span></h2>
+        <img class="project-logo" alt="Project logo" src="https://wiki.archiveteam.org/images/4/4d/LINE_BLOG_icon.png" height="50px" title=""/>
+        <h2>LINE BLOG <span class="links"><a href="https://lineblog.me/">Website</a> &middot; <a href="http://tracker.archiveteam.org/lineblog/">Leaderboard</a> &middot; <a href="https://wiki.archiveteam.org/index.php/LINE_BLOG">Wiki</a></span></h2>
         <p>Archiving LINE BLOG.</p>
-    ''',
-    utc_deadline = datetime.datetime(2023, 6, 29, 5, 0, 0)
+    '''
 )
 
 pipeline = Pipeline(
     CheckIP(),
-    GetItemFromTracker('http://{}/{}'
-        .format(TRACKER_HOST, TRACKER_ID),
+    GetItemFromTracker('http://{}/{}/multi={}/'
+        .format(TRACKER_HOST, 'arkivertest3', MULTI_ITEM_SIZE),
         downloader, VERSION),
     PrepareDirectories(warc_prefix=TRACKER_ID),
     WgetDownload(
-        WgetArgsMobile(),
-        max_tries=1,
+        WgetArgs(),
+        max_tries=2,
         accept_on_exit_code=[0, 4, 8],
         env={
             'item_dir': ItemValue('item_dir'),
-            'item_value': ItemValue('item_value'),
-            'item_type': ItemValue('item_type'),
-            'warc_file_base': ItemValue('warc_file_base'),
-        }
-    ),
-    WgetDownload(
-        WgetArgsDesktop(),
-        max_tries=1,
-        accept_on_exit_code=[0, 4, 8],
-        env={
-            'item_dir': ItemValue('item_dir'),
-            'item_value': ItemValue('item_value'),
-            'item_type': ItemValue('item_type'),
+            'item_names': ItemValue('item_name_newline'),
             'warc_file_base': ItemValue('warc_file_base'),
         }
     ),
@@ -396,13 +350,12 @@ pipeline = Pipeline(
         defaults={'downloader': downloader, 'version': VERSION},
         file_groups={
             'data': [
-                ItemInterpolation('%(item_dir)s/%(warc_file_base)s_mobile.warc.gz'),
-                ItemInterpolation('%(item_dir)s/%(warc_file_base)s_desktop.warc.gz'),
+                ItemInterpolation('%(item_dir)s/%(warc_file_base)s.warc.zst')
             ]
         },
         id_function=stats_id_function,
     ),
-    MoveFiles(),
+    #MoveFiles(),
     LimitConcurrent(NumberConfigValue(min=1, max=20, default='20',
         name='shared:rsync_threads', title='Rsync threads',
         description='The maximum number of concurrent uploads.'),
@@ -411,8 +364,8 @@ pipeline = Pipeline(
             downloader=downloader,
             version=VERSION,
             files=[
-                ItemInterpolation('%(data_dir)s/%(warc_file_base)s_mobile.warc.gz'),
-                ItemInterpolation('%(data_dir)s/%(warc_file_base)s_desktop.warc.gz'),
+                ItemInterpolation('%(data_dir)s/%(warc_file_base)s.%(dict_project)s.%(dict_id)s.warc.zst'),
+                ItemInterpolation('%(data_dir)s/%(warc_file_base)s_data.txt')
             ],
             rsync_target_source_path=ItemInterpolation('%(data_dir)s/'),
             rsync_extra_args=[
