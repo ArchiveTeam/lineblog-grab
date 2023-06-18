@@ -361,6 +361,21 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     end
   end
 
+  local function flatten_json(json)
+    local result = ""
+    for k, v in pairs(json) do
+      result = result .. " " .. k
+      local type_v = type(v)
+      if type_v == "string" then
+        v = string.gsub(v, "\\", "")
+        result = result .. " " .. v .. ' "' .. v .. '"'
+      elseif type_v == "table" then
+        result = result .. " " .. flatten_json(v)
+      end
+    end
+    return result
+  end
+
   if item_type == "cdn-obs"
     and not string.match(url, "^https://[^/]+/[^/]+/[a-z]+$") then
     check(url .. "/small")
@@ -435,6 +450,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     local is_tag_api = string.match(url, "^https?://[^/]*lineblog%.me/api/tag/")
     if is_blog_api or is_tag_api then
       local json = JSON:decode(html)
+      html = html .. " "  .. flatten_json(json)
       local next_page_key = nil
       if is_blog_api then
         json = json["data"]
@@ -519,7 +535,7 @@ wget.callbacks.write_to_warc = function(url, http_stat)
       and string.match(url["url"], "/comment/list")
       and json["error"]["errorCode"] == 4002
       and json["error"]["message"] == "コメントは表示出来ません" then
-      print("Comments now allowed on post.")
+      print("Comments not allowed on post.")
       return false
     elseif status ~= 200 and status ~= "success" then
       print("Bad API response.")
@@ -528,7 +544,7 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     end
   elseif item_type ~= "cdn-obs"
     and item_type ~= "resize"
-    and http_stat["statcode"] ~= 302
+    and http_stat["statcode"] ~= 301
     and http_stat["statcode"] ~= 404
     and not string.match(url["url"], "/_/embed_resize/")
     and not string.match(url["url"], "/site%.css")
