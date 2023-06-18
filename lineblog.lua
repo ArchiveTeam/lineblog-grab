@@ -441,10 +441,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       elseif not is_tag_api then
         error()
       end
-      local next_page_key = nil
-      if json then
-        next_pahe_key = json["nextPageKey"]
-      end
+      local next_page_key = json and json["nextPageKey"]
       if next_page_key then
         next_page_key = tostring(next_page_key)
         local newurl = url
