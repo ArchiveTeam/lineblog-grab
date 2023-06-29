@@ -250,7 +250,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
 
   local function fix_case(newurl)
-    if not string.match(newurl, "^https?://.") then
+    if not string.match(newurl, "^https?://[^/]") then
       return newurl
     end
     if string.match(newurl, "^https?://[^/]+$") then
@@ -508,6 +508,10 @@ wget.callbacks.write_to_warc = function(url, http_stat)
   logged_response = true
   if not item_name then
     error("No item name found.")
+  end
+  if item_type == "cdn-obs"
+    and status_code == 400 then
+    return false
   end
   if string.match(url["url"], "^https?://blog%-api%.line%-apps%.com/v1/")
     or string.match(url["url"], "^https?://[^/]*lineblog%.me/api/tag/") then
